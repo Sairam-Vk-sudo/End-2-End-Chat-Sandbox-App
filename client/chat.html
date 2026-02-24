@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<body>
+
+<h2>Chat Room</h2>
+
+<input id="msg" placeholder="Enter message">
+<button onclick="send()">Send</button>
+
+<ul id="chat"></ul>
+
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+
+<script>
+const socket = io("http://localhost:5000");
+
+function send(){
+    socket.emit("sendMessage", {
+        sender: sessionStorage.getItem("username"),
+        message: msg.value
+    });
+}
+
+socket.on("receiveMessage", data => {
+    chat.innerHTML += `<li>${data.sender}: ${data.message}</li>`;
+});
+</script>
+
+</body>
+</html>
