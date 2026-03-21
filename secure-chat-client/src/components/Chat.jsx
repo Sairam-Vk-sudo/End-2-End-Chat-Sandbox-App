@@ -14,10 +14,9 @@ import {
 } from "../utils/crypto";
 
 function Chat() {
-  const { token } = useContext(AuthContext);
+  const { token, privateKey, publicKey } = useContext(AuthContext);
 
   const [socket, setSocket] = useState(null);
-  const [privateKey, setPrivateKey] = useState(null);
   const [users, setUsers] = useState({});
   const [selectedUser, setSelectedUser] = useState(null);
   const [message, setMessage] = useState("");
@@ -38,23 +37,7 @@ function Chat() {
 
   // 🔐 Setup encryption
   useEffect(() => {
-    if (!socket) return;
-
-    socket.on("connect", async () => {
-      const keyPair = await generateKeyPair();
-      setPrivateKey(keyPair.privateKey);
-
-      const exportedPublicKey = await crypto.subtle.exportKey(
-        "spki",
-        keyPair.publicKey
-      );
-
-      const publicKeyBase64 = btoa(
-        String.fromCharCode(...new Uint8Array(exportedPublicKey))
-      );
-
-      socket.emit("register", publicKeyBase64);
-    });
+    if (!socket || !privateKey) return;
 
     socket.on("users", (userList) => {
       setUsers(userList);
@@ -110,16 +93,64 @@ function Chat() {
       users[selectedUser].publicKey
     );
 
+    const senderEncryptedAESKey = await encryptAESKey(
+      aesKey,
+      publicKey
+    );
+
     socket.emit("send-message", {
       to: selectedUser,
       encryptedMessage: Array.from(new Uint8Array(encrypted)),
       encryptedAESKey: Array.from(new Uint8Array(encryptedAESKey)),
+      senderEncryptedAESKey: Array.from(new Uint8Array(senderEncryptedAESKey)),
       iv: Array.from(iv),
     });
 
     setChat((prev) => [...prev, "You: " + message]);
     setMessage("");
   }
+
+  useEffect(() => {
+    async function fetchHistory() {
+      if (!selectedUser || !users[selectedUser] || !privateKey) return;
+      try {
+        const res = await fetch(`http://localhost:5000/messages/${users[selectedUser].username}`, {
+          headers: { "Authorization": `Bearer ${token}` }
+        });
+        const data = await res.json();
+        const historyChat = [];
+        
+        for (const msg of data) {
+          try {
+            const keyToUseObj = msg.isMine ? msg.senderEncryptedAESKey : msg.encryptedAESKey;
+            if (!keyToUseObj) {
+              historyChat.push((msg.isMine ? "You: " : "Friend: ") + "[Secure Message Not Decryptable]");
+              continue;
+            }
+            const aesRaw = await crypto.subtle.decrypt(
+              { name: "RSA-OAEP" },
+              privateKey,
+              new Uint8Array(JSON.parse(keyToUseObj))
+            );
+            const aesKey = await crypto.subtle.importKey(
+              "raw", aesRaw, { name: "AES-GCM" }, true, ["decrypt"]
+            );
+            const dec = await crypto.subtle.decrypt(
+              { name: "AES-GCM", iv: new Uint8Array(JSON.parse(msg.iv)) },
+              aesKey,
+              new Uint8Array(JSON.parse(msg.encryptedMessage))
+            );
+            const finalMessage = new TextDecoder().decode(dec);
+            historyChat.push((msg.isMine ? "You: " : "Friend: ") + finalMessage);
+          } catch (e) {
+            console.error("Message decrypt err:", e);
+          }
+        }
+        setChat(historyChat);
+      } catch (err) { console.error("History fetch failed:", err); }
+    }
+    fetchHistory();
+  }, [selectedUser]);
 
   return (
     <div className="flex h-screen bg-slate-950 text-white">

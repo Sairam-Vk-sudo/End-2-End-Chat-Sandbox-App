@@ -19,10 +19,8 @@ mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log("MongoDB Connected"))
   .catch(err => console.log(err));
 
-const User = mongoose.model("User", {
-  username: { type: String, unique: true },
-  password: String,
-});
+const User = require("./models/User");
+const Message = require("./models/Message");
 
 // ======================
 // HTTP Server
@@ -35,7 +33,7 @@ const server = http.createServer(app);
 // ======================
 
 app.post("/register", async (req, res) => {
-  const { username, password } = req.body;
+  const { username, password, publicKey, encryptedPrivateKey, encryptedAppKey, ivAppKey, ivPrivateKey, salt } = req.body;
 
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -43,6 +41,12 @@ app.post("/register", async (req, res) => {
     await User.create({
       username,
       password: hashedPassword,
+      publicKey,
+      encryptedPrivateKey,
+      encryptedAppKey,
+      ivAppKey,
+      ivPrivateKey,
+      salt
     });
 
     res.json({ message: "User registered successfully" });
@@ -70,7 +74,41 @@ app.post("/login", async (req, res) => {
     { expiresIn: "1h" }
   );
 
-  res.json({ token });
+  res.json({
+    token,
+    publicKey: user.publicKey,
+    encryptedPrivateKey: user.encryptedPrivateKey,
+    encryptedAppKey: user.encryptedAppKey,
+    ivAppKey: user.ivAppKey,
+    ivPrivateKey: user.ivPrivateKey,
+    salt: user.salt
+  });
+});
+
+app.get("/messages/:username", async (req, res) => {
+  const token = req.headers.authorization?.split(" ")[1];
+  if (!token) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const otherUser = await User.findOne({ username: req.params.username });
+    if (!otherUser) return res.status(404).json({ error: "User not found" });
+
+    const messages = await Message.find({
+      $or: [
+        { sender: decoded.userId, receiver: otherUser._id },
+        { sender: otherUser._id, receiver: decoded.userId }
+      ]
+    }).sort({ timestamp: 1 }).lean();
+
+    const formattedMessages = messages.map(msg => ({
+      ...msg,
+      isMine: msg.sender.toString() === decoded.userId
+    }));
+    
+    res.json(formattedMessages);
+  } catch (err) {
+    res.status(401).json({ error: "Unauthorized" });
+  }
 });
 
 // ======================
@@ -99,37 +137,57 @@ io.use((socket, next) => {
   }
 });
 
-io.on("connection", (socket) => {
+io.on("connection", async (socket) => {
   console.log("Authenticated user connected:", socket.user.username);
 
-  // Register public key after authentication
-  socket.on("register", (publicKey) => {
-    users[socket.id] = {
-      username: socket.user.username,
-      publicKey,
-    };
-
-    io.emit("users", users);
-  });
+  try {
+    const userDoc = await User.findById(socket.user.userId);
+    if (userDoc) {
+      users[socket.id] = {
+        username: socket.user.username,
+        publicKey: userDoc.publicKey,
+      };
+      io.emit("users", users);
+    }
+  } catch (err) {
+    console.error(err);
+  }
 
   // Encrypted message relay
-  socket.on("send-message", (data) => {
-  const { to, encryptedMessage, encryptedAESKey, iv } = data;
+  socket.on("send-message", async (data) => {
+  const { to, encryptedMessage, encryptedAESKey, senderEncryptedAESKey, iv } = data;
 
-  console.log("\n--- Encrypted Message Relay ---");
-  console.log("From:", socket.user.username);
-  console.log("To:", users[to]?.username);
-  console.log("Encrypted Message:", encryptedMessage);
-  console.log("Encrypted AES Key:", encryptedAESKey);
-  console.log("IV:", iv);
-  console.log("--------------------------------\n");
+  try {
+    // lookup receiver session
+    const receiverSession = users[to];
+    let receiverUser;
+    
+    if (receiverSession) {
+      receiverUser = await User.findOne({ username: receiverSession.username });
+    }
 
-  io.to(to).emit("receive-message", {
-    from: socket.id,
-    encryptedMessage,
-    encryptedAESKey,
-    iv,
-  });
+    if (receiverUser) {
+      const msg = new Message({
+        sender: socket.user.userId,
+        receiver: receiverUser._id,
+        encryptedMessage: JSON.stringify(encryptedMessage),
+        encryptedAESKey: JSON.stringify(encryptedAESKey),
+        senderEncryptedAESKey: senderEncryptedAESKey ? JSON.stringify(senderEncryptedAESKey) : undefined,
+        iv: JSON.stringify(iv)
+      });
+      await msg.save();
+    }
+
+    io.to(to).emit("receive-message", {
+      from: socket.id,
+      encryptedMessage,
+      encryptedAESKey,
+      senderEncryptedAESKey,
+      iv,
+    });
+  } catch (err) {
+    console.error("Message save error:", err);
+  }
 });
 
   socket.on("disconnect", () => {

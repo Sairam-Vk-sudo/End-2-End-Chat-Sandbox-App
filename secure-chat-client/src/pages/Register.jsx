@@ -1,18 +1,51 @@
 import { useState } from "react";
+import { generateKeyPair, generateAESKey, deriveMasterKey, encryptSymmetric } from "../utils/crypto";
 
 function Register({ switchToLogin }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
 
   async function handleRegister() {
-    await fetch("http://localhost:5000/register", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
-    });
+    try {
+      const keyPair = await generateKeyPair();
+      const appKey = await generateAESKey();
+      
+      const saltBuffer = crypto.getRandomValues(new Uint8Array(16));
+      const saltString = btoa(String.fromCharCode(...saltBuffer));
+      const masterKey = await deriveMasterKey(password, saltString);
+      
+      const privateKeyRaw = await crypto.subtle.exportKey("pkcs8", keyPair.privateKey);
+      const appKeyRaw = await crypto.subtle.exportKey("raw", appKey);
+      
+      const { encrypted: encryptedPrivateKey, iv: ivPrivateKey } = await encryptSymmetric(privateKeyRaw, appKey);
+      const { encrypted: encryptedAppKey, iv: ivAppKey } = await encryptSymmetric(appKeyRaw, masterKey);
+      
+      const publicKeyRaw = await crypto.subtle.exportKey("spki", keyPair.publicKey);
+      const publicKeyBase64 = btoa(String.fromCharCode(...new Uint8Array(publicKeyRaw)));
 
-    alert("Registered successfully");
-    switchToLogin();
+      const bufToBase64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+
+      await fetch("http://localhost:5000/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username,
+          password,
+          publicKey: publicKeyBase64,
+          encryptedPrivateKey: bufToBase64(encryptedPrivateKey),
+          encryptedAppKey: bufToBase64(encryptedAppKey),
+          ivAppKey: bufToBase64(ivAppKey),
+          ivPrivateKey: bufToBase64(ivPrivateKey),
+          salt: saltString
+        }),
+      });
+
+      alert("Registered successfully");
+      switchToLogin();
+    } catch (err) {
+      console.error(err);
+      alert("Registration failed");
+    }
   }
 
   return (

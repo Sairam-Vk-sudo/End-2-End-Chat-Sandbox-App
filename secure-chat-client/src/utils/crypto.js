@@ -54,3 +54,47 @@ export async function encryptAESKey(aesKey, receiverPublicKeyBase64) {
     rawAESKey
   );
 }
+
+export async function deriveMasterKey(password, saltString) {
+  const enc = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(password),
+    { name: "PBKDF2" },
+    false,
+    ["deriveKey"]
+  );
+
+  const saltBuf = Uint8Array.from(atob(saltString), c => c.charCodeAt(0));
+
+  return await crypto.subtle.deriveKey(
+    {
+      name: "PBKDF2",
+      salt: saltBuf,
+      iterations: 100000,
+      hash: "SHA-256"
+    },
+    keyMaterial,
+    { name: "AES-GCM", length: 256 },
+    true,
+    ["encrypt", "decrypt"]
+  );
+}
+
+export async function encryptSymmetric(dataBuffer, aesKey) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encrypted = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    aesKey,
+    dataBuffer
+  );
+  return { encrypted, iv };
+}
+
+export async function decryptSymmetric(encryptedBuffer, ivBuffer, aesKey) {
+  return await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: ivBuffer },
+    aesKey,
+    encryptedBuffer
+  );
+}
