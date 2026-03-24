@@ -2,7 +2,7 @@ const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const cors = require("cors");
-const PORT = process.env.PORT || 5000;
+const PORT = 5000;
 const Message = require("./models/Message");
 const authRoutes = require("./routes/auth");
 
@@ -40,6 +40,6 @@ io.on("connection", (socket) => {
 
 });
 
-server.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+server.listen(5000, "0.0.0.0", () => {
+    console.log("Server running on port 5000");
 });

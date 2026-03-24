@@ -4,17 +4,6 @@
 
 <h2>Chat Room</h2>
 
-<!-- Role Selection -->
-<label>Select Role:</label>
-<select id="role">
-    <option value="user">User</option>
-    <option value="attacker">Attacker</option>
-</select>
-
-<button onclick="startChat()">Start Chat</button>
-
-<br><br>
-
 <input id="msg" placeholder="Enter message">
 <button onclick="send()">Send</button>
 
@@ -23,41 +12,26 @@
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 
 <script>
-let socket;
-let role;
+// 🔥 CONNECT DIRECTLY TO BACKEND (PORT 5000)
+const socket = io("http://:5000");
 
-// Start chat after selecting role
-function startChat() {
-    role = document.getElementById("role").value;
+const username = sessionStorage.getItem("username");
 
-    socket = io("http://localhost:5000", {
-        query: {
-            username: sessionStorage.getItem("username"),
-            role: role
-        }
-    });
-
-    socket.on("receiveMessage", data => {
-        if(role === "attacker"){
-            // Attacker sees intercepted messages
-            chat.innerHTML += `<li style="color:red">[Intercepted] ${data.sender}: ${data.message}</li>`;
-        } else {
-            chat.innerHTML += `<li>${data.sender}: ${data.message}</li>`;
-        }
-    });
-}
+// Receive messages
+socket.on("receiveMessage", data => {
+    chat.innerHTML += `<li><b>${data.sender}:</b> ${data.message}</li>`;
+});
 
 // Send message
 function send(){
-    if(!socket){
-        alert("Click Start Chat first!");
-        return;
-    }
+    if(!msg.value) return;
 
     socket.emit("sendMessage", {
-        sender: sessionStorage.getItem("username"),
+        sender: username,
         message: msg.value
     });
+
+    msg.value = ""; // clear input
 }
 </script>
 

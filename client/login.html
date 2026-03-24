@@ -11,35 +11,50 @@
 <button onclick="login()">Login</button>
 
 <script>
+
+const BASE_URL = "http://:5000";  // <-- replace with your IP
+
 async function register(){
-    await fetch("http://localhost:5000/auth/register", {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-            username:user.value,
-            password:pass.value
-        })
-    });
-    alert("Registered!");
+    try {
+        const res = await fetch(`${BASE_URL}/auth/register`, {
+            method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({
+                username:user.value,
+                password:pass.value
+            })
+        });
+
+        const text = await res.text();
+        alert(text || "Registered!");
+    } catch(err){
+        alert("Error connecting to server");
+        console.error(err);
+    }
 }
 
 async function login(){
-    const res = await fetch("http://localhost:5000/auth/login", {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-            username:user.value,
-            password:pass.value
-        })
-    });
+    try {
+        const res = await fetch(`${BASE_URL}/auth/login`, {
+            method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({
+                username:user.value,
+                password:pass.value
+            })
+        });
 
-    const text = await res.text();
+        const text = await res.text();
 
-    if(text === "Login success"){
-        sessionStorage.setItem("username", user.value);
-        window.location = "chat.html";
-    } else {
-        alert(text);
+        if(text === "Login success"){
+            sessionStorage.setItem("username", user.value);
+            window.location = "chat.html";
+        } else {
+            alert(text);
+        }
+    } catch(err){
+        alert("Error connecting to server");
+        console.error(err);
     }
 }
 </script>
